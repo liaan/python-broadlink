@@ -7,7 +7,7 @@ import time
 import random
 import socket
 import threading
-import parse
+import parser
 import struct
 
 def gendevice(devtype, host, mac):
@@ -250,7 +250,7 @@ class device:
     packet[0x20] = checksum & 0xff
     packet[0x21] = checksum >> 8
 
-    print 'Sending Packet:\n'+''.join(format(x, '02x') for x in packet)+"\n"
+    #print 'Sending Packet:\n'+''.join(format(x, '02x') for x in packet)+"\n"
     starttime = time.time()
     with self.lock:
       while True:
@@ -480,170 +480,275 @@ class rm(device):
       return temp
 	  
 class ac_db(device):
-  def __init__ (self, host, mac):
-    device.__init__(self, host, mac)
-    self.type = "Ac Danham bush"
-
-  
+	import logging
 	
-  def check_sensors_raw(self):
-    packet = bytearray(16)
-    packet[0] = 1
-    response = self.send_packet(0x6a, packet)
-    err = response[0x22] | (response[0x23] << 8)
-    if err == 0:
-      data = {}
-      aes = AES.new(bytes(self.key), AES.MODE_CBC, bytes(self.iv))
-      payload = aes.decrypt(bytes(response[0x38:]))
-      if type(payload[0x4]) == int:
-        data['temperature'] = (payload[0x4] * 10 + payload[0x5]) / 10.0
-        data['humidity'] = (payload[0x6] * 10 + payload[0x7]) / 10.0
-        data['light'] = payload[0x8]
-        data['air_quality'] = payload[0x0a]
-        data['noise'] = payload[0xc]
-      else:
-        data['temperature'] = (ord(payload[0x4]) * 10 + ord(payload[0x5])) / 10.0
-        data['humidity'] = (ord(payload[0x6]) * 10 + ord(payload[0x7])) / 10.0
-        data['light'] = ord(payload[0x8])
-        data['air_quality'] = ord(payload[0x0a])
-        data['noise'] = ord(payload[0xc])
-      return data	
-	  
-  def check_temperature(self):
-    packet = bytearray(32)
-    packet[0] = 1
-    response = self.send_packet(0x6a, packet)
-    err = response[0x22] | (response[0x23] << 8)
-    if err == 0:
-      aes = AES.new(bytes(self.key), AES.MODE_CBC, bytes(self.iv))
-      payload = aes.decrypt(bytes(response[0x38:]))
-      if type(payload[0x4]) == int:
-        temp = (payload[0x4] * 10 + payload[0x5]) / 10.0
-      else:
-        temp = (ord(payload[0x4]) * 10 + ord(payload[0x5])) / 10.0
-      return temp
-  
-  
-  ###  UDP checksum fucntion
-  def checksum_func(self,data):
-	checksum = 0
-	data_len = len(data)
-	if (data_len%2) == 1:
-		data_len += 1
-		data += struct.pack('!B', 0)
-
-	for i in range(0, len(data), 2):
-		w = (data[i] << 8) + (data[i + 1])
-		checksum += w
-
-	checksum = (checksum >> 16) + (checksum & 0xFFFF)
-	checksum = ~checksum&0xFFFF
-	return checksum
-  
-  def test(self):
+	##Static stuff
 	class FIXATION:
 		class VERTICAL:
-			#OFF= 0b00000000
+			#STOP= 0b00000000
 			TOP= 0b00000001
-			MIDDLE= 0b00000010
+			MIDDLE1= 0b00000010
 			MIDDLE2 = 0b00000011
-			BOTTOM= 0b00000100
+			MIDDLE3 = 0b00000100
+			BOTTOM= 0b00000101
 			SWING= 0b00000110
 			AUTO = 0b00000111
 			
-	class MODE:
-		COOLING	=	0b00000010
-		DRY		=	0b00000100
-		HEATING	=	0b00001000
-		AUTO	=	0b00000000
-		FAN 	=	0b00001100   
-	OFF = 0
-	ON = 1
-	
-  
-	#packet = bytearray(32)
-	#10111011 00000000 00000110 10000000 00000000 00000000 00001111 00000000 00000001 9 00000001 10 01000111 11 00101000  12 00100000 13 10100000 14 00000000 15 00100000  16 00000000 17 00000000 18 00100000 19 00000000 20 00010000 21 00000000 22 00000101 10010001 10010101
-
-	data = {}
-	data['temp'] = 24
-	data['fixation_v'] = FIXATION.VERTICAL.AUTO
-	data['power'] = ON
-	data['mode'] = MODE.HEATING
-	data['sleep'] = OFF
- 	
-	if data['temp'] < 16:
-		data['temp'] = 16
-	elif data['temp'] > 32:
-		data['temp'] = 32
+		class HORIZONTAL:		##Don't think this really works for all devices.
+			LEFT_FIX = 2;
+			LEFT_FLAP = 1;
+			LEFT_RIGHT_FIX = 7;
+			LEFT_RIGHT_FLAP = 0;
+			RIGHT_FIX = 6;
+			RIGHT_FLAP = 5;
+			ON = 0
+			OFF = 1
 		
-	##Temperature is offset by 8
-	temperature = data['temp'] -8
-	
- 	#0b11000111
-	byte_10 = temperature << 3 | data['fixation_v']
-	print "bla:" +  format(byte_10, '02x')
-	 
-	payload  = bytearray.fromhex("bb 00 06 80 00 00 0f 00 01 01 9f 22 88 a0 000000000000000000")
-	payload[0] = 0xbb
-	payload[1] = 0x00
-	payload[2] = 0x06
-	payload[3] = 0x80
-	payload[4] = 0x00
-	payload[5] = 0x00
-	payload[6] = 0x0f
-	payload[7] = 0x00
-	payload[8] = 0x01
-	payload[9] = 0x01
-	payload[10] = temperature << 3 | data['fixation_v']   #1 2 Temprature dunno 6-7:Swing Pos 0 up, 1 middle? 2 down 3hold? 8:Swing. 1 Fixed, 0 Temprature:  8+value
-	payload[11] = 0b00101000   
-	payload[12] = 0b10100000  # bit 1:  0.5  #bit
-	payload[13] = 0b10100000
-	payload[14] = 0x00
-	payload[15] = data['mode'] << 4 | data['sleep'] << 2 # "mode"  80 heat  ‭1000 0000‬, 20 cooling ‭0010 0000‬  40 dry ‭0100 0000‬  Auto 0000   0000 0100 Sleep
-	payload[16] = 0b00000000
-	payload[17] = 0x00
-	payload[18] = data['power']<<5 # 3 bit on/off
-	payload[19] = 0x00
-	payload[20] = 0b00010000   #0001 Display on
-	payload[21] = 0b00000000  
-	payload[22] = 0b00000000 
-	
-	
-	
-	# first byte is length, Then placeholder then payload +2 for CRC16	
-	request_payload = bytearray(32)
-	print "Packet:"+ ''.join(format(x, '02x') for x in request_payload)
-	request_payload[0] = len(payload) + 2  ##Length plus of payload plus crc	
-	print "Packet:"+ ''.join(format(x, '02x') for x in request_payload)
-	request_payload[2:len(payload)+2] = payload  ##Add the Payload
-	
-	print "Packet:"+ ''.join(format(x, '02x') for x in request_payload)
-	
-	# append CRC
-	crc = self.checksum_func(payload)
-	print "Checksum:"+format(crc,'02x')
-	request_payload[len(payload)+1] = ((crc >> 8) & 0xFF)
-	request_payload[len(payload)+2] = crc & 0xFF
-	
-	
-	print len(request_payload)
-	print "Packet:"+ ''.join(format(x, '02x') for x in request_payload)
-	
-	response = self.send_packet(0x6a, request_payload)
-	 
-	
-	#response = bytearray.fromhex("5aa5aa555aa5aa55000000000000000000000000000000000000000000000000e5d900002a4e6a001781af41a70d43b401000000c4c20000735660cad8ada342d7a4e93e38ba7c6d29cbfc4f2ddfdec75720b2d04da25894")
-	print "Resposnse:" + ''.join(format(x, '02x') for x in response)
+	class FAN:
+		LOW = 	0b00000011
+		MID = 	0b00000010
+		HIGH =	0b00000001
+		AUTO = 	0b00000101  
+			
+	class MODE:
+		COOLING	=	0b00000001
+		DRY		=	0b00000010
+		HEATING	=	0b00000100
+		AUTO	=	0b00000000
+		FAN 	=	0b00000110   
+		
+	class ONOFF:
+		OFF = 0
+		ON = 1
 
-	err = response[0x22] | (response[0x23] << 8)
-	if err == 0:
-		aes = AES.new(bytes(self.key), AES.MODE_CBC, bytes(self.iv))		
-		response_payload = aes.decrypt(bytes(response[0x38:]))
+		
+	status = {}
+	status['temp'] = float(19)
+	status['fixation_v'] = FIXATION.VERTICAL.AUTO
+	status['power'] = ONOFF.ON
+	status['mode'] = MODE.AUTO
+	status['sleep'] = ONOFF.OFF
+	status['display'] = ONOFF.ON
+	status['health'] = ONOFF.OFF
+	status['fixation_h'] = FIXATION.HORIZONTAL.LEFT_RIGHT_FIX
+	status['fanspeed']  = FAN.AUTO
+	status['turbo'] = ONOFF.OFF
+	status['mute'] = ONOFF.OFF
+	status['clean'] = ONOFF.OFF
+	status['mildew'] = ONOFF.OFF
+	status['macaddress'] = None
+	status['hostip'] = None
+	status['lastupdate'] = None
+	debug  = 0;
 	
-		print "Payload:" + response_payload+"\n"
-    	print "Payload: Nice:" + ''.join(x.encode('hex') for x in response_payload )
+ 
+	def __init__ (self, host, mac,debug = False):			
+		self.logger = self.logging.getLogger(__name__)
+		self.status['hostip'] = host
+		self.status['macaddress'] = ''.join(format(x, '02x') for x in mac) 
+		
+		self.logging.basicConfig(level=(self.logging.DEBUG if debug else self.logging.INFO))
+		self.logger.debug("Debugging Enabled");		
+		device.__init__(self, host, mac)		
+		
+		self.type = "Ac Danham bush"
+		##Populate array with latest data
+		self.logger.debug("Authenticating")
+		if self.auth() == False:
+			return False;
+		self.logger.debug("Getting current details in init")	
+		self.get_ac_states()
 
-	return "done"
+	
+	def set_temperature(self,temperature):
+		self.status['temp'] = float(temperature)
+		return
+		
+	def switch_off(self):
+		##Make sure latest info as cannot just update one things, have set all
+		self.get_ac_states()
+		self.status['power'] =  self.ONOFF.OFF
+		self.set_ac_status()
+		return self.status
+		
+	def switch_on(self):
+		##Make sure latest info as cannot just update one things, have set all
+		self.get_ac_states()
+		self.status['power'] =  self.ONOFF.ON
+		self.set_ac_status()
+		
+		return
+
+		
+	  
+	def get_ac_info(self):
+		GET_AC_INFO = bytearray.fromhex("0C00BB0006800000020021011B7E0000")
+		response = self.send_packet(0x6a, GET_AC_INFO)
+		print "Resposnse:" + ''.join(format(x, '02x') for x in response)
+		
+		err = response[0x22] | (response[0x23] << 8)
+		if err == 0:
+		  aes = AES.new(bytes(self.key), AES.MODE_CBC, bytes(self.iv))
+		  response_payload = aes.decrypt(bytes(response[0x38:]))
+		  print "AC INFO Payload:" + response_payload+"\n"
+		  print "AC INFO::" + ''.join(x.encode('hex') for x in response_payload )
+		  
+		  
+	### Get AC Status
+	## GEt the current status of the aircon and parse into status array a one have to send full status each time for update, cannot just send one setting
+	##
+	def get_ac_states(self):    
+		GET_STATES =  bytearray.fromhex("0C00BB0006800000020011012B7E0000")  ##From app
+		
+		response = self.send_packet(0x6a, GET_STATES)
+		#print ("Response:" + ''.join(format(x, '02x') for x in response))		
+		
+		err = response[0x22] | (response[0x23] << 8)
+		if err == 0:
+			aes = AES.new(bytes(self.key), AES.MODE_CBC, bytes(self.iv))
+			response_payload = bytes(aes.decrypt(bytes(response[0x38:])))			
+			#print ("AC INFO Payload:" + response_payload+"\n")
+			#print ("AC INFO::" + '\n'.join(x.encode('hex') for x in response_payload )  )
+			response_payload = bytearray(response_payload)
+			packet_type = response_payload[4]			
+			if packet_type != 0x07:  ##Should be result packet, otherwise something weird
+				return False
+			
+			packet_len = response_payload[0]
+			if packet_len != 0x19:  ##should be 25, if not, then wrong packet
+				return False
+			
+			response_payload  = response_payload[2:]  ##Drop leading stuff as dont need
+			self.logger.debug ("" + ' '.join(format(x, '08b') for x in response_payload[9:] )  )
+			#print("11: " + format(response_payload[18],'02x'))
+			#print ("11: " +  format(response_payload[18] & 0b1111000,'08b'))
+			#print ("11 s:" +  format(response_payload[18]>>5,'08b'))
+			
+			
+			self.status['temp'] = 8+ (response_payload[10]>>3) + (0.5 * float(response_payload[12]>>7))
+			self.status['power'] = response_payload[18] >>5 &0b00000001
+			self.status['fixation_v'] = response_payload[10] & 0b00000111
+			self.status['mode'] = response_payload[15] >> 5 & 0b00001111
+			self.status['sleep'] = response_payload[15] >> 2 & 0b00000001
+			self.status['display'] =response_payload[20] >> 4 & 0b00000001
+			self.status['mildew'] =response_payload[20] >> 3 & 0b00000001
+			self.status['health'] = response_payload[18] >> 1 & 0b00000001
+			self.status['fixation_h'] = response_payload[10]  & 0b00000111
+			self.status['fanspeed']  = response_payload[13] >> 5 & 0b00000111
+			self.status['ifeel'] = response_payload[15] >> 3& 0b00000001
+			self.status['mute'] = response_payload[14] >> 7& 0b00000001
+			self.status['turbo'] = response_payload[14] >> 6& 0b00000001
+			self.status['clean'] = response_payload[18] >> 2& 0b00000001
+			
+			self.status['lastupdate'] = time.time()
+			return self.status;
+			 
+			
+		else:
+			return 0
+			
+			
+		return self.status
+  
+	###  UDP checksum function
+	def checksum_func(self,data):
+		checksum = 0
+		data_len = len(data)
+		if (data_len%2) == 1:
+			data_len += 1
+			data += struct.pack('!B', 0)
+
+		for i in range(0, len(data), 2):
+			w = (data[i] << 8) + (data[i + 1])
+			checksum += w
+
+		checksum = (checksum >> 16) + (checksum & 0xFFFF)
+		checksum = ~checksum&0xFFFF
+		return checksum
+		
+  
+	def set_ac_status(self):
+		 
+		#packet = bytearray(32)
+		#10111011 00000000 00000110 10000000 00000000 00000000 00001111 00000000 00000001 9 00000001 10 01000111 11 00101000  12 00100000 13 10100000 14 00000000 15 00100000  16 00000000 17 00000000 18 00100000 19 00000000 20 00010000 21 00000000 22 00000101 10010001 10010101
+
+		if self.status['temp'] < 16:
+			temperature = 16
+			temperature_05 = 0
+		elif self.status['temp'] > 32:
+			temperature = 32
+			temperature_05 = 0
+		else:
+			##if 0.5 then make true	. Also  offset with 8
+			if self.status['temp'].is_integer():
+				temperature = int( self.status['temp'] - 8 ) 
+				temperature_05 = 0
+			else:
+				temperature_05 = 1	
+				temperature = int(data['temp'] -8)
+		
+		
+		payload  = bytearray(23)
+		payload[0] = 0xbb
+		payload[1] = 0x00
+		payload[2] = 0x06  # Send command, seems like 07 is response
+		payload[3] = 0x80
+		payload[4] = 0x00
+		payload[5] = 0x00
+		payload[6] = 0x0f  # Set status .. #02 -> get info?
+		payload[7] = 0x00
+		payload[8] = 0x01
+		payload[9] = 0x01
+		payload[10] = temperature << 3 | self.status['fixation_v'] 
+		payload[11] = 0b00000000 | self.status['fixation_h'] <<5
+		payload[12] = 0b00001111 | temperature_05 << 7   # bit 1:  0.5  #bit   if 0b?1 then nothing done....  last 6 is some sort of packet_id
+		payload[13] = 0b00000000 | self.status['fanspeed'] << 5
+		payload[14] = 0b00000000 | self.status['turbo'] << 6 | self.status['mute'] << 7
+		payload[15] = 0b00000000 | self.status['mode'] << 5 | self.status['sleep'] << 2   
+		payload[16] = 0b00000000
+		payload[17] = 0x00
+		payload[18] = 0b00000000 | self.status['power']<<5 | self.status['health'] << 1 | self.status['clean'] << 2
+		payload[19] = 0x00
+		payload[20] = 0b00000000 |  self.status['display'] <<4  | self.status['mildew'] << 3
+		payload[21] = 0b00000000  
+		payload[22] = 0b00000000 
+		
+		self.logger.debug ("Payload:"+ ''.join(format(x, '02x') for x in payload))
+		
+		# first byte is length, Then placeholder then payload +2 for CRC16	
+		request_payload = bytearray(32)		
+		request_payload[0] = len(payload) + 2  ##Length plus of payload plus crc			
+		request_payload[2:len(payload)+2] = payload  ##Add the Payload
+		
+		# append CRC
+		crc = self.checksum_func(payload)
+		self.logger.debug ("Checksum:"+format(crc,'02x'))
+		request_payload[len(payload)+1] = ((crc >> 8) & 0xFF)
+		request_payload[len(payload)+2] = crc & 0xFF
+		
+		
+		
+		self.logger.debug ("Packet:"+ ''.join(format(x, '02x') for x in request_payload))
+		
+		response = self.send_packet(0x6a, request_payload)
+		self.logger.debug ("Resposnse:" + ''.join(format(x, '02x') for x in response))
+
+		err = response[0x22] | (response[0x23] << 8)
+		if err == 0:
+			aes = AES.new(bytes(self.key), AES.MODE_CBC, bytes(self.iv))		
+			response_payload = aes.decrypt(bytes(response[0x38:]))
+			response_payload = bytearray(response_payload)
+			packet_type = response_payload[4]						
+			if packet_type == 0x07:  ##Should be result packet, otherwise something weird
+				return self.status
+			else:
+				return False
+				
+		
+			#print ("Payload:" + response_payload+"\n")
+			self.logger.debug ("Payload: Nice:" + ''.join(x.encode('hex') for x in response_payload ))
+
+		return "done"
 
 	
 # For legay compatibility - don't use this
