@@ -520,7 +520,8 @@ class ac_db(device):
 	class ONOFF:
 		OFF = 0
 		ON = 1
-
+	
+	status_nice = {}
 		
 	status = {}
 	status['temp'] = float(19)
@@ -561,7 +562,10 @@ class ac_db(device):
 
 	
 	def set_temperature(self,temperature):
+		self.logger.debug("Setting temprature to %s",temperature)
+		self.get_ac_states()
 		self.status['temp'] = float(temperature)
+		self.set_ac_status()
 		return
 		
 	def switch_off(self):
@@ -624,24 +628,43 @@ class ac_db(device):
 			#print ("11: " +  format(response_payload[18] & 0b1111000,'08b'))
 			#print ("11 s:" +  format(response_payload[18]>>5,'08b'))
 			
+			print self.FIXATION.VERTICAL.__dict__
+			
 			
 			self.status['temp'] = 8+ (response_payload[10]>>3) + (0.5 * float(response_payload[12]>>7))
-			self.status['power'] = response_payload[18] >>5 &0b00000001
+			self.status['power'] = response_payload[18] >>5 & 0b00000001
 			self.status['fixation_v'] = response_payload[10] & 0b00000111
 			self.status['mode'] = response_payload[15] >> 5 & 0b00001111
 			self.status['sleep'] = response_payload[15] >> 2 & 0b00000001
 			self.status['display'] =response_payload[20] >> 4 & 0b00000001
-			self.status['mildew'] =response_payload[20] >> 3 & 0b00000001
+			self.status['mildew'] = response_payload[20] >> 3 & 0b00000001
 			self.status['health'] = response_payload[18] >> 1 & 0b00000001
 			self.status['fixation_h'] = response_payload[10]  & 0b00000111
 			self.status['fanspeed']  = response_payload[13] >> 5 & 0b00000111
 			self.status['ifeel'] = response_payload[15] >> 3& 0b00000001
 			self.status['mute'] = response_payload[14] >> 7& 0b00000001
-			self.status['turbo'] = response_payload[14] >> 6& 0b00000001
+			self.status['turbo'] =response_payload[14] >> 6& 0b00000001
 			self.status['clean'] = response_payload[18] >> 2& 0b00000001
-			
 			self.status['lastupdate'] = time.time()
-			return self.status;
+			
+			self.status_nice['temp'] = self.status['temp']
+			self.status_nice['power'] = self.get_key(self.ONOFF.__dict__,self.status['power'])
+			self.status_nice['fixation_v'] = self.get_key(self.FIXATION.VERTICAL.__dict__,self.status['fixation_v'])
+			self.status_nice['mode'] = self.get_key(self.MODE.__dict__,self.status['mode'])
+			self.status_nice['sleep'] = self.get_key(self.ONOFF.__dict__,self.status['sleep'])
+			self.status_nice['display'] = self.get_key(self.ONOFF.__dict__,self.status['display'])
+			self.status_nice['mildew'] = self.get_key(self.ONOFF.__dict__,self.status['mildew'])
+			self.status_nice['health'] = self.get_key(self.ONOFF.__dict__,self.status['health'])
+			self.status_nice['fixation_h'] = self.get_key(self.FIXATION.VERTICAL.__dict__,self.status['fixation_h'])
+			self.status_nice['fanspeed']  = self.get_key(self.FAN.__dict__,self.status['fanspeed'])
+			self.status_nice['ifeel'] = self.get_key(self.ONOFF.__dict__,self.status['ifeel'])
+			self.status_nice['mute'] = self.get_key(self.ONOFF.__dict__,self.status['mute'])
+			self.status_nice['turbo'] = self.get_key(self.ONOFF.__dict__,self.status['turbo'])
+			self.status_nice['clean'] = self.get_key(self.ONOFF.__dict__,self.status['clean'])
+			self.status_nice['macaddress'] = self.status['macaddress']
+			
+			
+			return self.status_nice
 			 
 			
 		else:
@@ -649,7 +672,16 @@ class ac_db(device):
 			
 			
 		return self.status
-  
+		
+	def get_key(self,list,search_value):
+		print list
+		for key,value in list.iteritems():  			
+			if value == search_value:
+				return key
+		##Not found so return value;
+		return search_value
+			
+			
 	###  UDP checksum function
 	def checksum_func(self,data):
 		checksum = 0
@@ -673,10 +705,10 @@ class ac_db(device):
 		#10111011 00000000 00000110 10000000 00000000 00000000 00001111 00000000 00000001 9 00000001 10 01000111 11 00101000  12 00100000 13 10100000 14 00000000 15 00100000  16 00000000 17 00000000 18 00100000 19 00000000 20 00010000 21 00000000 22 00000101 10010001 10010101
 
 		if self.status['temp'] < 16:
-			temperature = 16
+			temperature = 16-8
 			temperature_05 = 0
 		elif self.status['temp'] > 32:
-			temperature = 32
+			temperature = 32-8
 			temperature_05 = 0
 		else:
 			##if 0.5 then make true	. Also  offset with 8
@@ -699,7 +731,7 @@ class ac_db(device):
 		payload[7] = 0x00
 		payload[8] = 0x01
 		payload[9] = 0x01
-		payload[10] = temperature << 3 | self.status['fixation_v'] 
+		payload[10] = 0b00000000 | temperature << 3 | self.status['fixation_v'] 
 		payload[11] = 0b00000000 | self.status['fixation_h'] <<5
 		payload[12] = 0b00001111 | temperature_05 << 7   # bit 1:  0.5  #bit   if 0b?1 then nothing done....  last 6 is some sort of packet_id
 		payload[13] = 0b00000000 | self.status['fanspeed'] << 5
