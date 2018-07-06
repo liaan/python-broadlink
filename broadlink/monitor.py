@@ -26,28 +26,23 @@ sys.path.insert(100, os.path.join(os.path.dirname(__file__), './ext/paho-mqtt-cl
 import client as mqtt
 
 class AcToMqtt:
-
+	device = None
 	def __init__(self):
 		#devices = broadlink.discover(timeout=1)
 		#print devices[0].type
 		
-		self._connect_mqtt()
+		self._connect_mqtt()		
+		self.device = broadlink.ac_db(host=(ac_host,ac_port), mac=bytearray.fromhex(ac_mac),debug=debug)		
 		
-		device = broadlink.ac_db(host=(ac_host,ac_port), mac=bytearray.fromhex(ac_mac),debug=debug)		
-		
-		
-		
-		
-		
-		logger.debug(device.host)
-		logger.debug( "Device type detected: " +device.type)
+		logger.debug(self.device.host)
+		logger.debug( "Device type detected: " +self.device.type)
 		logger.debug( "Starting device test()")			
 		
 		
 		#device.switch_on()
 		while True:
 			try:
-				status =  device.get_ac_states()
+				status =  self.device.get_ac_states()
 				if status:
 					self.publish_mqtt_info(status);
 				else:
@@ -62,12 +57,9 @@ class AcToMqtt:
 			
 	def publish_mqtt_info(self,status):
 	
-			
+			##Publish all values in status
 			for value,key in enumerate(status):
-				print key
-				print status[key]
-				self._publish(binascii.hexlify(status['macaddress'])+'/'+key+ '/value',bytes(status[key]))
-			
+				self._publish(status['macaddress']+'/'+key+ '/value',bytes(status[key]))			
 			return 
 
 			#self._publish(binascii.hexlify(status['macaddress'])+'/'+ 'temp/value',status['temp']);
@@ -98,33 +90,37 @@ class AcToMqtt:
 
 					
 	def _on_mqtt_message(self, client, userdata, msg):
-
+		
 		try:
+			
 			logger.debug('message! userdata: %s, message %s' % (userdata, msg.topic+" "+str(msg.payload)))
-			address = msg.topic.split('/')[-2]
-
-			## Way to hacky method, need get into struct or something
-			output = '0107'+address+'000607';
-			if msg.payload == "ON" :
-					msg.payload = 100
-
-			if msg.payload == "OFF":
-					msg.payload = 0
-			logger.debug("sending value %s" ,"%02d" % ((int(msg.payload)*64)/100))
-			##Make it into hex from 100 .. get converted back when gets send from hex to int .. prob better way todo it.
-			output += "%02d" % ((int(msg.payload)*64)/100)
-			#output += "%02d" % int(msg.payload)
-
-			logger.debug('Writing Message: %s' % output)
+			##Function is second last
+			function = msg.topic.split('/')[-2]
+			address = msg.topic.split('/')[-3]
+			value = msg.payload
+			logger.debug('Function: %s, Address %s , value %s' %(function,address,value))
+			
 		except:
 			return
 
 
-		try:
-			self.qwickswitch_dev.write(1,binascii.unhexlify(output))
-		except usb.core.USBError as e:
-			##aaasdf
-			print e		
+		##Process received		
+		if function ==  "temp":			
+			self.device.set_temperature(float(value[0:3]))
+			
+		elif function == "power":
+			if value.lower() == "on":
+				device.switch_on()
+			elif value.lower() == "off":
+				device.switch_off()
+			else:
+				return
+		else:
+			logger.debug("No function match")
+			return
+			
+			
+		
 			
 	def _on_mqtt_connect(self, client, userdata, flags, rc):
 
@@ -142,7 +138,7 @@ class AcToMqtt:
 		logger.debug('connected! client=%s, userdata=%s, flags=%s, rc=%s' % (client, userdata, flags, rc))
 		# Subscribing in on_connect() means that if we lose the connection and
 		# reconnect then subscriptions will be renewed.
-		client.subscribe("/aircon/+/+/set")			
+		client.subscribe("/aircon/+/+/set")
 				
 				
 def stop_if_already_running():
